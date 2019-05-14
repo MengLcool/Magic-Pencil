@@ -3,31 +3,110 @@ import torch.nn as nn
 import torchvision.transforms as transforms
 import torch.nn.functional as F 
 import cv2 
-from PIL import Image
+from PIL import Image , ImageFilter
+
 import matplotlib.pyplot as plt
 import math
 import numpy as np 
+import time 
+from modify_histo import match_histo
+import sys
+import os
 
 DIRECTIONNUM = 8
 LINEDIVISOR = 25
 
 
+def tensor_save_output(img_tensor, name):
+    img = img_tensor.squeeze().numpy()
+    img = Image.fromarray(img * 255)
+
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+
+    img.save(name)
+	# if img.mode != 'RGB':
+	# 	img = img.convert('RGB')
+	# img.save(name)
+
+
+class TextureLearn(nn.Module):
+	def __init__(self , textname,target ,device = 'cuda'):
+		super().__init__()
+		self.device = device
+		self.theta = 0.5
+		self.avoid_add = 0.01
+		self.C ,self.H , self.W = target.size()
+		print(type(self.H),type(self.W))
+		texture = Image.open(textname).resize((self.W , self.H))
+		texture = texture.convert('L') 	
+		texture.show()
+		self.H = transforms.ToTensor()(texture).to(self.device)
+
+
+		self.logH = torch.log(self.H) 
+		target = target.to(self.device) + self.avoid_add
+		self.logTar = torch.log(target) 
+		# print(self.logTar.size()  ,self.logTar)
+		#self.weight = torch.zeros_like( self.logTar , requires_grad =True)
+		#self.weight = nn.Parameter(torch.Tensor(self.logTar.size()) , requires_grad = True)
+		
+		# self.weight.data.uniform_(0.0, 0.02)
+		self.weight = nn.Parameter(torch.abs(torch.randn_like(self.logTar)))
+	
+		print( 'weight , target , H ' ,self.weight.size(), self.logTar.size(), self.H.size())
+		print('okkkkkkay')
+
+	def forward(self):
+		return  self.H  **self.weight - self.avoid_add
+	
+	def loss (self):
+		#print (((self.weight * self.logH - self.logTar)**2).mean())
+		#print(((self.weight[:-1,:]-self.weight[1:,:])**2).mean() )
+		content_loss = ((self.weight * self.logH - self.logTar)**2).sum()
+		dx_loss = self.theta * ((self.weight[:,:-1,:]-self.weight[:,1:,:])**2).sum() 
+		dy_loss =   self.theta * ((self.weight[:,:,:-1]-self.weight[:,:,1:])**2).sum()
+		
+		loss = content_loss  + dy_loss + dx_loss 
+		#print ('content ,dy ,dx' , content_loss , dy_loss , dx_loss)
+		#print('loss ', type(loss.item()),loss.item())
+		return loss 
+
+	def train(self):
+		self.to(self.device)
+		optimizer = torch.optim.Adam(self.parameters(), lr=0.8)
+		for i in range (150):
+			loss = self.loss()
+			optimizer.zero_grad()
+			loss.backward()
+			if i %10 == 9:
+				print('render loss :',loss.item())
+			optimizer.step()
+
+		return 
+		
 
 class PencilDraw(nn.Module):
-	def __init__(self):
+	def __init__(self , device = 'cpu'):
 		super().__init__()
 		self.transform = transforms.Compose([transforms.ToTensor()])
 		self.unloader = transforms.ToPILImage()
-		
-	def show(self, x ):
+		self.device = device
+	
+	def show(self, x ,filename =None ):
+		x = x.to('cpu')
 		show = self.unloader(x)
-		print(type(show))
+		#print(type(show))
 		show.show()
+		if filename:
+			show.save(os.path.join('output', filename))
+		#(show , filename)
 
 	# data is C*H*W tensor 
 	# TODO: add cuda compute
-	def get_line(self,input_data , gammaS = 5 ):
+	def get_line(self,input_data , gammaS = 2 ):
 
+		input_data = input_data.to(self.device)
 		print(input_data.dtype)
 		print('max min ' ,input_data.max(), input_data.min())
 		# get kernel 
@@ -56,18 +135,19 @@ class PencilDraw(nn.Module):
 					if x < kernel_size and x >=0:
 						kernel[i,y,x] = 1
 		
+		kernel = nn.Parameter(kernel,requires_grad = False).to(self.device).to(self.device)
 
-		#compute dx , dy  forward differnece
-		dx = torch.cat([input_data[:,:,:-1]- input_data[:,:,1:],torch.zeros(1,H,1)],2)
-		dy = torch.cat ([input_data[:,:-1,:]-input_data[:,1:,:],torch.zeros(1,1,W)],1)
+		#compute dx , dFy  forward differnece
+		dx = torch.cat([input_data[:,:,:-1]- input_data[:,:,1:],torch.zeros(1,H,1).to(self.device)],2)
+		dy = torch.cat ([input_data[:,:-1,:]-input_data[:,1:,:],torch.zeros(1,1,W).to(self.device)],1)
 		d_image = torch.sqrt(dx*dx+dy*dy)
-		self.show((1-d_image)**gammaS)
+		self.show((1-d_image)**gammaS ,'test_gd.jpg')
 
 		# improve 
 		d_image[d_image<0.01] = 0
 		#d_image[d_image>0] +=0.01
 
-		G = torch.zeros(1,DIRECTIONNUM,H,W)
+		G = torch.zeros(1,DIRECTIONNUM,H,W).to(self.device)
 		for n in range(DIRECTIONNUM):
 			data = d_image[0]
 			output = F.conv2d(data.expand(1,1,*data.size()),kernel[n].expand(1,1,*kernel[n].size()),padding=kernel[n].size()[0]//2 )     
@@ -80,7 +160,7 @@ class PencilDraw(nn.Module):
 		print('test g size ' , G.size())
 		_ , g_index = G.max(1) 
 		g_index = g_index.squeeze()
-		C = torch.zeros(1,DIRECTIONNUM,H,W)
+		C = torch.zeros(1,DIRECTIONNUM,H,W).to(self.device)
 	
 		# classify 
 		for i in range(DIRECTIONNUM):
@@ -99,9 +179,30 @@ class PencilDraw(nn.Module):
 		print('sp size ' , Sp.size())
 		Sp = (Sp - Sp.min()) / (Sp.max() - Sp.min())
 		Sp = (1- Sp) **gammaS
-		self.show(Sp)
+		self.show(Sp , 'test_line.jpg')
+		return Sp
 	
-	
+	def get_tone (self, img_data):
+		
+		mod_data = match_histo(img_data)
+		mod_data = self.transform(mod_data)
+		self.show(mod_data ,'test_tone.jpg')
+		return mod_data
+
+	def render_texture(self, img_data , texturename):
+		
+		print('start render !!!!')
+		
+		texture = TextureLearn(texturename , img_data ,self.device)
+		texture.train()
+		render_result = texture()
+
+		self.show(render_result, 'test_texture.jpg')
+
+		return render_result
+
+
+
 	def forward(self,filename):
 		img = Image.open(filename)
 				
@@ -112,14 +213,34 @@ class PencilDraw(nn.Module):
 
 		img_gray = img.convert('L') 
 
+		tone = self.get_tone(np.array(img_gray.filter(ImageFilter.SMOOTH))).to(self.device)
+		tone = self.render_texture(tone , 'texture.jpg')
 		# C*H*W tensor
 		img = self.transform(img)
 		img_gray = self.transform(img_gray)
 
-		print('test img gray size ' , img_gray.size() )
-		self.get_line(img_gray)
+		_ , self.H , self.W = img_gray.size()
+		print ( 'img size ' ,self.H , self.W)
+		
+		line = self.get_line(img_gray)
+
+		# tensor_save_output(tone.to('cpu'), 'tone.jpg')
+		# tensor_save_output(line.to('cpu') ,'line.jpg')
+		S = tone * line 
+
+		
+		self.show(S,'test_result.jpg')
 
 if __name__ == "__main__":
-	pc = PencilDraw()
-	pc('test2.jpg')
+	start = time.time()
+	pc = PencilDraw(device = 'cuda')
+	
+	argv = sys.argv
+	if len(argv)>1:
+		filename = argv[1]
+	else :
+		filename = 'test.jpg'
 
+	pc(filename)
+
+	print('spend time ',time.time() - start)
