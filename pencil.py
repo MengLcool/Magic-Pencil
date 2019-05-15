@@ -17,6 +17,20 @@ DIRECTIONNUM = 8
 LINEDIVISOR = 25
 
 
+def np_show(Imag):
+	img = Image.fromarray(Imag*255)
+	img.show()
+
+def show_hsv(img , filename = None):
+	img = Image.fromarray(img , mode = 'HSV')
+	img = img.convert('RGB')
+	img.show()
+
+	
+	if filename:
+		img.save(os.path.join('output', filename))
+
+
 def tensor_save_output(img_tensor, name):
     img = img_tensor.squeeze().numpy()
     img = Image.fromarray(img * 255)
@@ -31,16 +45,20 @@ def tensor_save_output(img_tensor, name):
 
 
 class TextureLearn(nn.Module):
-	def __init__(self , textname,target ,device = 'cuda'):
+	def __init__(self , textname,target ,device = None):
 		super().__init__()
-		self.device = device
+		if device:
+			self.device = device
+		else :
+			self.device  = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
 		self.theta = 0.5
-		self.avoid_add = 0.01
+		self.avoid_add = 0.001
 		self.C ,self.H , self.W = target.size()
 		print(type(self.H),type(self.W))
 		texture = Image.open(textname).resize((self.W , self.H))
 		texture = texture.convert('L') 	
-		texture.show()
+		#texture.show()
 		self.H = transforms.ToTensor()(texture).to(self.device)
 
 
@@ -93,18 +111,20 @@ class PencilDraw(nn.Module):
 		self.unloader = transforms.ToPILImage()
 		self.device = device
 	
-	def show(self, x ,filename =None ):
+	def show(self, x , filename =None , mode = None):
 		x = x.to('cpu')
 		show = self.unloader(x)
 		#print(type(show))
+		if mode :
+			show.mode = mode 
 		show.show()
 		if filename:
 			show.save(os.path.join('output', filename))
 		#(show , filename)
 
 	# data is C*H*W tensor 
-	# TODO: add cuda compute
-	def get_line(self,input_data , gammaS = 2 ):
+
+	def get_line(self,input_data , gammaS = 1 ):
 
 		input_data = input_data.to(self.device)
 		print(input_data.dtype)
@@ -144,7 +164,7 @@ class PencilDraw(nn.Module):
 		self.show((1-d_image)**gammaS ,'test_gd.jpg')
 
 		# improve 
-		d_image[d_image<0.01] = 0
+		d_image[d_image<0.015] = 0
 		#d_image[d_image>0] +=0.01
 
 		G = torch.zeros(1,DIRECTIONNUM,H,W).to(self.device)
@@ -203,17 +223,31 @@ class PencilDraw(nn.Module):
 
 
 
-	def forward(self,filename):
+	def forward(self,filename , mode = 'gray'):
 		img = Image.open(filename)
 				
 		counter = 1 
-		if min(img.size[0] , img.size[1])// counter >1000:
+		print(min(img.size[0] , img.size[1])// counter)
+		while (min(img.size[0] , img.size[1])/ counter >1000):
 			counter *=2 
+			print('test counter' , counter)
+		
 		img = img.resize((img.size[0]//counter,img.size[1]//counter))
+		img = img.filter(ImageFilter.SMOOTH)
+		print(img.size)
+		if mode == 'gray':
+			img_gray = img.convert('L') 
+			img_gray = np.array(img_gray)	
+		else :
+			img_color = np.array(img.convert('HSV'))
+			print ('test pre img color size ' , img_color.shape)
+			img_gray = img_color[:,:,2]
+			
+		
+		clahe = cv2.createCLAHE(clipLimit=5.0, tileGridSize=(8, 8))
+		img_gray = clahe.apply(img_gray)
 
-		img_gray = img.convert('L') 
-
-		tone = self.get_tone(np.array(img_gray.filter(ImageFilter.SMOOTH))).to(self.device)
+		tone = self.get_tone(img_gray).to(self.device)
 		tone = self.render_texture(tone , 'texture.jpg')
 		# C*H*W tensor
 		img = self.transform(img)
@@ -228,10 +262,16 @@ class PencilDraw(nn.Module):
 		# tensor_save_output(line.to('cpu') ,'line.jpg')
 		S = tone * line 
 
-		
-		self.show(S,'test_result.jpg')
+		if mode == 'gray':
+			self.show(S,'test_result.jpg')
+		else :
+			img_color[:,:,2] = S.detach().cpu().numpy()*255 
+			show_hsv(img_color,'test_result_color.jpg')
+			#self.show(img_color , 'test_result_color.jpg')
 
 if __name__ == "__main__":
+
+
 	start = time.time()
 	pc = PencilDraw(device = 'cuda')
 	
@@ -240,7 +280,11 @@ if __name__ == "__main__":
 		filename = argv[1]
 	else :
 		filename = 'test.jpg'
+	if len(argv)>2:
+		mode = argv[2]
+	else :
+		mode = 'gray'
 
-	pc(filename)
+	pc(filename , mode )
 
 	print('spend time ',time.time() - start)
