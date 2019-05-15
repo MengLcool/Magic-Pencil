@@ -31,10 +31,10 @@ Here are some original picture and productions in some steps .
 <p align="center">My life is brilliant</p>
 
 <div align="center">	
-	<img src="output/test_gd_2.jpg" height="600"/>
-	<img src="output/test_line_2.jpg" height="600"/>
-	<img src="output/test_tone_2.jpg" height="600"/>
-	<img src="output/test_texture_2.jpg" height="600"/>
-	<img src="output/test9.jpg" height="600"/>
-	<img src="output/test_result_color_2.jpg" height="600"/>
+	<img src="output/test_gd_2.jpg" height="400"/>
+	<img src="output/test_line_2.jpg" height="400"/>
+	<img src="output/test_tone_2.jpg" height="400"/>
+	<img src="output/test_texture_2.jpg" height="400"/>
+	<img src="output/test9.jpg" height="400"/>
+	<img src="output/test_result_color_2.jpg" height="400"/>
 </div>
