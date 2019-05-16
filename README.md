@@ -1,5 +1,6 @@
 # Magic-Pencil
-implementation of "Combining Sketch and Tone for Pencil Drawing Production"
+implementation of [Combining Sketch and Tone for Pencil Drawing Production](<http://www.cse.cuhk.edu.hk/leojia/projects/pencilsketch/pencil_drawing.htm>)
+
 
 ## requirement
 

@@ -22,7 +22,7 @@ def np_show(Imag):
     img.show()
 
 def show_hsv(img , filename = None):
-    img = Image.fromarray(img , mode = 'HSV')
+    img = Image.fromarray(img , mode = 'YCbCr')
     img = img.convert('RGB')
     img.show()
 
@@ -155,7 +155,7 @@ class PencilDraw(nn.Module):
                     if x < kernel_size and x >=0:
                         kernel[i,y,x] = 1
         
-        kernel = nn.Parameter(kernel,requires_grad = False).to(self.device).to(self.device)
+        kernel = nn.Parameter(kernel,requires_grad = False).to(self.device)
 
         #compute dx , dFy  forward differnece
         dx = torch.cat([input_data[:,:,:-1]- input_data[:,:,1:],torch.zeros(1,H,1).to(self.device)],2)
@@ -239,9 +239,9 @@ class PencilDraw(nn.Module):
             img_gray = img.convert('L') 
             img_gray = np.array(img_gray)	
         else :
-            img_color = np.array(img.convert('HSV'))
+            img_color = np.array(img.convert('YCbCr'))
             print ('test pre img color size ' , img_color.shape)
-            img_gray = img_color[:,:,2]
+            img_gray = img_color[:,:,0]
             
         
         clahe = cv2.createCLAHE(clipLimit=5.0, tileGridSize=(8, 8))
@@ -265,7 +265,7 @@ class PencilDraw(nn.Module):
         if mode == 'gray':
             self.show(S,'test_result.jpg')
         else :
-            img_color[:,:,2] = S.detach().cpu().numpy()*255 
+            img_color[:,:,0] = S.detach().cpu().numpy()*255 
             show_hsv(img_color,'test_result_color.jpg')
             #self.show(img_color , 'test_result_color.jpg')
 
